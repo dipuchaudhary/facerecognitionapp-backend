@@ -23,31 +23,55 @@ const db = knex({
   }
 });
 
-console.log(db.select('*').from('users'));
-
 app.get('/', (req,res) => {
     res.json(database.users);
 })
 
 app.post('/signin', (req, res) => {
-    if (req.body.email === database.users[0].email && req.body.password === database.users[0].password) {
-        res.json(database.users[0]);
-    } else {
-        res.status(400).json('error logging in');
-   }   
+    db.select('email','password').from('login')
+    .where('email','=',req.body.email)
+    .then(data => {
+        const isValid = bcrypt.compareSync(req.body.password,data[0].password);
+        if(isValid) {
+            return db.select('*').from('users')
+            .where('email','=',req.body.email)
+            .then(user => {
+                res.json(user[0])
+            })
+            .catch(error => res.status(400).json('unable to get users'))
+        }else {
+            res.status(400).json('wrong credentials')
+        }
+    })
+    .catch(error => res.status(400).json('wrong credentials'))
 })
 
 app.post('/register', (req, res) => {
     const { name, email, password } = req.body;
-    db('users')
-    .returning('*')
-    .insert({
-        email: email,
-        name: name,
-        joined: new Date()
-    }).then(user => {
-         res.json(user);
-    }).catch(err => res.status(400).json('unable to register'));
+    const pass = bcrypt.hashSync(password);
+    db.transaction(trx => {
+        trx.insert({
+            email : email,
+            password : pass
+        })
+        .into('login')
+        .returning('email')
+        .then(loginEmail =>{
+            return trx('users')
+             .returning('*')
+             .insert({
+               email: loginEmail[0],
+               name: name,
+              joined: new Date()
+            })
+            .then(user => {
+              res.json(user[0]);
+          }) 
+        })
+        .then(trx.commit)
+        .catch(trx.rollback)
+    } )
+    .catch(err => res.status(400).json('unable to register'));
    
 })
 
